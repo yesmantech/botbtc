@@ -155,8 +155,8 @@ func main() {
 	// Start async event writer.
 	eventWriter.Start(ctx)
 
-	// Start market data poller.
-	marketPoller.Start(ctx)
+	// Start market data poller (runs in background goroutine because it blocks).
+	go marketPoller.Start(ctx)
 
 	// Start Prometheus metrics endpoint.
 	go func() {
