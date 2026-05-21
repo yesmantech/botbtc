@@ -1,46 +1,52 @@
 //+------------------------------------------------------------------+
 //| BingX_PriceFeeder.mq5                                            |
-//| Fetches real BTC price from BingX API and feeds it into MT5      |
-//| as a custom symbol "BTCUSDT.bingx"                                |
+//| Receives real BTC price from Go server via TCP (zero HTTP)       |
+//| and feeds it into MT5 as custom symbol "BTCUSDT.bingx"           |
 //|                                                                   |
 //| HOW IT WORKS:                                                     |
-//|  1. Creates a custom symbol "BTCUSDT.bingx" in MT5               |
-//|  2. Polls BingX public API every 200ms for best bid/ask          |
-//|  3. Injects ticks into the custom symbol via CustomTicksAdd()    |
-//|  4. The scalper EA runs on a chart of this custom symbol         |
+//|  1. Creates custom symbol "BTCUSDT.bingx" in MT5                 |
+//|  2. Connects to Go server price feed on TCP port 9091            |
+//|  3. Receives tick data pushed by the Go server (sub-ms latency)  |
+//|  4. Injects ticks into custom symbol via CustomTicksAdd()        |
+//|                                                                   |
+//| WHY TCP INSTEAD OF HTTP:                                          |
+//|  - WebRequest() in MT5 is BLOCKING (~15ms per call)              |
+//|  - TCP socket read is non-blocking (<0.1ms via localhost)        |
+//|  - Go server already has BingX prices from its market poller     |
+//|  - No extra HTTP calls = zero impact on trading latency          |
 //|                                                                   |
 //| SETUP:                                                            |
-//|  1. Attach this EA to any chart (e.g. EURUSD M1)                |
-//|  2. Allow WebRequest in MT5: Tools > Options > Expert Advisors   |
-//|     Add URL: https://open-api.bingx.com                          |
-//|  3. Open a chart for "BTCUSDT.bingx" custom symbol               |
+//|  1. Start the Go server (it opens port 9091 for price feed)     |
+//|  2. Attach this EA to any chart                                  |
+//|  3. Open chart for "BTCUSDT.bingx" custom symbol                 |
 //|  4. Attach BTC_Scalper_Signal EA to that chart                   |
 //+------------------------------------------------------------------+
 #property copyright "BotBTC"
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
+#include <Trade\SymbolInfo.mqh>
+
 // ── Inputs ──────────────────────────────────────────────────────────
-input int    PollIntervalMs  = 200;     // Poll interval (milliseconds)
-input string CustomSymbol    = "BTCUSDT.bingx";  // Custom symbol name
-input string BingxBaseUrl    = "https://open-api.bingx.com";
+input string FeedHost        = "127.0.0.1";       // Go server host
+input int    FeedPort        = 9091;               // Price feed port
+input string CustomSymbol    = "BTCUSDT.bingx";   // Custom symbol name
+input int    ReconnectMs     = 2000;               // Reconnect interval on disconnect
 
 // ── Globals ─────────────────────────────────────────────────────────
-string g_apiUrl;
-bool   g_symbolCreated = false;
+int    g_socket = INVALID_HANDLE;
 int    g_tickCount = 0;
 int    g_errorCount = 0;
+bool   g_connected = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                             |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Build API URL
-   g_apiUrl = BingxBaseUrl + "/openApi/swap/v2/quote/bookTicker?symbol=BTC-USDT";
-   
    // Create custom symbol if it doesn't exist
-   if(!SymbolExist(CustomSymbol, g_symbolCreated))
+   bool isCustom = false;
+   if(!SymbolExist(CustomSymbol, isCustom))
    {
       if(!CustomSymbolCreate(CustomSymbol, "", "BingX"))
       {
@@ -51,33 +57,31 @@ int OnInit()
    }
    else
    {
-      Print("✅ Custom symbol exists: ", CustomSymbol);
+      Print("✅ Custom symbol already exists: ", CustomSymbol);
    }
    
-   // Set symbol properties
-   CustomSymbolSetInteger(CustomSymbol, SYMBOL_DIGITS, 1);           // 1 decimal (77232.4)
-   CustomSymbolSetDouble(CustomSymbol, SYMBOL_POINT, 0.1);           // min price step
-   CustomSymbolSetDouble(CustomSymbol, SYMBOL_TRADE_TICK_SIZE, 0.1); // tick size
+   // Set symbol properties for BTC
+   CustomSymbolSetInteger(CustomSymbol, SYMBOL_DIGITS, 1);
+   CustomSymbolSetDouble(CustomSymbol, SYMBOL_POINT, 0.1);
+   CustomSymbolSetDouble(CustomSymbol, SYMBOL_TRADE_TICK_SIZE, 0.1);
    CustomSymbolSetDouble(CustomSymbol, SYMBOL_TRADE_TICK_VALUE, 0.1);
-   CustomSymbolSetDouble(CustomSymbol, SYMBOL_VOLUME_MIN, 0.001);    // min lot
+   CustomSymbolSetDouble(CustomSymbol, SYMBOL_VOLUME_MIN, 0.001);
    CustomSymbolSetDouble(CustomSymbol, SYMBOL_VOLUME_MAX, 100.0);
    CustomSymbolSetDouble(CustomSymbol, SYMBOL_VOLUME_STEP, 0.001);
    CustomSymbolSetString(CustomSymbol, SYMBOL_CURRENCY_BASE, "BTC");
    CustomSymbolSetString(CustomSymbol, SYMBOL_CURRENCY_PROFIT, "USDT");
-   CustomSymbolSetString(CustomSymbol, SYMBOL_DESCRIPTION, "BTC/USDT from BingX Exchange");
+   CustomSymbolSetString(CustomSymbol, SYMBOL_DESCRIPTION, "BTC/USDT from BingX (via Go server)");
    
-   // Enable the symbol in Market Watch
+   // Enable in Market Watch
    SymbolSelect(CustomSymbol, true);
    
-   // Set timer for polling
-   EventSetMillisecondTimer(PollIntervalMs);
+   // Connect to Go server price feed
+   ConnectToFeed();
    
-   Print("🚀 BingX Price Feeder started — polling every ", PollIntervalMs, "ms");
-   Print("📡 API URL: ", g_apiUrl);
+   // Poll every 50ms for incoming price data
+   EventSetMillisecondTimer(50);
    
-   // Do initial fetch
-   FetchAndInjectTick();
-   
+   Print("🚀 BingX Price Feeder v2 started (TCP mode, zero HTTP)");
    return INIT_SUCCEEDED;
 }
 
@@ -87,73 +91,120 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-   Print("🛑 BingX Price Feeder stopped. Total ticks: ", g_tickCount, " Errors: ", g_errorCount);
+   if(g_socket != INVALID_HANDLE)
+   {
+      SocketClose(g_socket);
+      g_socket = INVALID_HANDLE;
+   }
+   Print("🛑 Price Feeder stopped. Ticks: ", g_tickCount, " Errors: ", g_errorCount);
 }
 
 //+------------------------------------------------------------------+
-//| Timer event — fires every PollIntervalMs                         |
+//| Connect to Go server price feed                                  |
+//+------------------------------------------------------------------+
+bool ConnectToFeed()
+{
+   if(g_socket != INVALID_HANDLE)
+   {
+      SocketClose(g_socket);
+      g_socket = INVALID_HANDLE;
+   }
+   
+   g_socket = SocketCreate();
+   if(g_socket == INVALID_HANDLE)
+   {
+      Print("❌ SocketCreate failed: ", GetLastError());
+      g_connected = false;
+      return false;
+   }
+   
+   if(!SocketConnect(g_socket, FeedHost, FeedPort, 3000))
+   {
+      Print("⚠️ Cannot connect to ", FeedHost, ":", FeedPort, " — retrying...");
+      SocketClose(g_socket);
+      g_socket = INVALID_HANDLE;
+      g_connected = false;
+      return false;
+   }
+   
+   g_connected = true;
+   Print("✅ Connected to price feed ", FeedHost, ":", FeedPort);
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Timer — read price data from TCP socket                          |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   FetchAndInjectTick();
+   // Reconnect if disconnected
+   if(!g_connected || g_socket == INVALID_HANDLE)
+   {
+      ConnectToFeed();
+      return;
+   }
+   
+   // Check if data is available (non-blocking)
+   uint dataLen = SocketIsReadable(g_socket);
+   if(dataLen == 0)
+      return;
+   
+   // Read data
+   uchar buf[];
+   int bytesRead = SocketRead(g_socket, buf, dataLen, 10);
+   if(bytesRead <= 0)
+   {
+      g_errorCount++;
+      g_connected = false;
+      Print("⚠️ Socket read error, reconnecting...");
+      return;
+   }
+   
+   // Parse received data — format: "BID ASK\n" per line
+   // Example: "77232.4 77232.6\n"
+   string data = CharArrayToString(buf, 0, bytesRead, CP_UTF8);
+   
+   // Split by newlines in case multiple ticks arrived
+   string lines[];
+   int lineCount = StringSplit(data, '\n', lines);
+   
+   for(int i = 0; i < lineCount; i++)
+   {
+      string line = lines[i];
+      StringTrimRight(line);
+      StringTrimLeft(line);
+      if(StringLen(line) == 0) continue;
+      
+      // Parse "BID ASK"
+      string parts[];
+      int partCount = StringSplit(line, ' ', parts);
+      if(partCount < 2) continue;
+      
+      double bidPrice = StringToDouble(parts[0]);
+      double askPrice = StringToDouble(parts[1]);
+      
+      if(bidPrice <= 0 || askPrice <= 0) continue;
+      
+      // Inject tick
+      InjectTick(bidPrice, askPrice);
+   }
 }
 
 //+------------------------------------------------------------------+
-//| Fetch BingX price and inject into custom symbol                  |
+//| Inject a tick into the custom symbol                             |
 //+------------------------------------------------------------------+
-void FetchAndInjectTick()
+void InjectTick(double bid, double ask)
 {
-   // ── HTTP request to BingX public API ──
-   string headers = "";
-   char   postData[];
-   char   result[];
-   string resultHeaders;
-   
-   int httpCode = WebRequest(
-      "GET",                    // method
-      g_apiUrl,                 // URL
-      headers,                  // headers
-      3000,                     // timeout ms
-      postData,                 // POST data (empty for GET)
-      result,                   // response body
-      resultHeaders             // response headers
-   );
-   
-   if(httpCode != 200)
-   {
-      g_errorCount++;
-      if(g_errorCount % 50 == 1) // Log every 50th error to avoid spam
-         Print("⚠️ BingX API error, HTTP ", httpCode, " (error #", g_errorCount, ")");
-      return;
-   }
-   
-   // ── Parse JSON response ──
-   string json = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-   
-   // Extract bid_price and ask_price from JSON
-   double bidPrice = ExtractJsonDouble(json, "bid_price");
-   double askPrice = ExtractJsonDouble(json, "ask_price");
-   
-   if(bidPrice <= 0 || askPrice <= 0)
-   {
-      g_errorCount++;
-      if(g_errorCount % 50 == 1)
-         Print("⚠️ Invalid price: bid=", bidPrice, " ask=", askPrice);
-      return;
-   }
-   
-   // ── Create tick and inject ──
    MqlTick tick;
    ZeroMemory(tick);
    tick.time      = TimeCurrent();
-   tick.time_msc  = (long)(TimeLocal()) * 1000 + GetTickCount() % 1000;
-   tick.bid       = bidPrice;
-   tick.ask       = askPrice;
-   tick.last      = (bidPrice + askPrice) / 2.0;
+   tick.time_msc  = (long)GetMicrosecondCount() / 1000;
+   tick.bid       = bid;
+   tick.ask       = ask;
+   tick.last      = (bid + ask) / 2.0;
    tick.volume    = 1;
    tick.flags     = TICK_FLAG_BID | TICK_FLAG_ASK | TICK_FLAG_LAST;
    
-   // Inject tick into custom symbol
    MqlTick ticks[];
    ArrayResize(ticks, 1);
    ticks[0] = tick;
@@ -162,62 +213,13 @@ void FetchAndInjectTick()
    if(added > 0)
    {
       g_tickCount++;
-      // Log every 500 ticks (~100 seconds at 200ms interval)
       if(g_tickCount % 500 == 0)
-         Print("📊 Tick #", g_tickCount, " — BTC bid=", bidPrice, " ask=", askPrice, 
-               " spread=", NormalizeDouble(askPrice - bidPrice, 1));
+         Print("📊 Tick #", g_tickCount, " — bid=", bid, " ask=", ask);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Extract a double value from JSON by key                          |
-//| Simple parser — finds "key": value pattern                       |
+//| OnTick — not used                                                |
 //+------------------------------------------------------------------+
-double ExtractJsonDouble(const string &json, const string key)
-{
-   string searchKey = "\"" + key + "\"";
-   int keyPos = StringFind(json, searchKey);
-   if(keyPos < 0) return -1;
-   
-   // Find the colon after the key
-   int colonPos = StringFind(json, ":", keyPos + StringLen(searchKey));
-   if(colonPos < 0) return -1;
-   
-   // Find the start of the number (skip spaces and quotes)
-   int numStart = colonPos + 1;
-   int jsonLen = StringLen(json);
-   
-   while(numStart < jsonLen)
-   {
-      ushort ch = StringGetCharacter(json, numStart);
-      if(ch == ' ' || ch == '"') 
-         numStart++;
-      else
-         break;
-   }
-   
-   // Find end of number
-   int numEnd = numStart;
-   while(numEnd < jsonLen)
-   {
-      ushort ch = StringGetCharacter(json, numEnd);
-      if((ch >= '0' && ch <= '9') || ch == '.' || ch == '-')
-         numEnd++;
-      else
-         break;
-   }
-   
-   if(numEnd <= numStart) return -1;
-   
-   string numStr = StringSubstr(json, numStart, numEnd - numStart);
-   return StringToDouble(numStr);
-}
-
-//+------------------------------------------------------------------+
-//| OnTick — not used, we run on timer                               |
-//+------------------------------------------------------------------+
-void OnTick()
-{
-   // Price feeder runs on timer, not on ticks
-}
+void OnTick() {}
 //+------------------------------------------------------------------+

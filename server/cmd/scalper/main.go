@@ -175,6 +175,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start price feed server (pushes BingX prices to MT5 via TCP).
+	priceFeed := bridge.NewPriceFeedServer(cfg.Bridge.Host, cfg.Bridge.Port+1, logger)
+	if err := priceFeed.Start(ctx); err != nil {
+		logger.Error("failed to start price feed server", "error", err)
+		os.Exit(1)
+	}
+
+	// Forward market data ticks to MT5 price feed clients.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case bt, ok := <-marketPoller.BookChan():
+				if !ok {
+					return
+				}
+				priceFeed.BroadcastTick(bt.BidPrice, bt.AskPrice)
+			}
+		}
+	}()
+
 	// Start execution pipeline.
 	pipeline.Start(ctx)
 
