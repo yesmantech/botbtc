@@ -187,7 +187,7 @@ bool CBridgeClient::Send(const string json_payload)
    }
 
    int sent = SocketSend(m_socket, send_buffer, bytes_to_send);
-   if(sent == SOCKET_ERROR || sent != bytes_to_send)
+   if(sent == -1 || sent != bytes_to_send)
    {
       int err = GetLastError();
       PrintFormat("[BridgeClient] SocketSend failed – error %d (sent %d / %d)",

@@ -90,8 +90,7 @@ int OnInit()
    // --- Start 1-second health-check timer ---
    EventSetTimer(1);
 
-   // --- Enable chart events for kill switch ---
-   ChartSetInteger(0, CHART_EVENT_KEYBOARD, true);
+   // Keyboard events are received via OnChartEvent by default in MQL5
 
    g_initialized = true;
    g_killSwitch  = false;
