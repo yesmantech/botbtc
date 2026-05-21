@@ -106,10 +106,15 @@ func (c *LiveClient) GetBookTicker(ctx context.Context, symbol string) (*BookTic
 	if err != nil {
 		return nil, err
 	}
-	var bt BookTicker
-	if err := json.Unmarshal(body, &bt); err != nil {
+
+	// BingX wraps the book ticker: {"book_ticker": {...}}
+	var wrapper struct {
+		BookTicker BookTicker `json:"book_ticker"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
 		return nil, fmt.Errorf("bingx: parse book ticker: %w", err)
 	}
+	bt := wrapper.BookTicker
 	if bt.Timestamp == 0 {
 		bt.Timestamp = time.Now().UnixMilli()
 	}

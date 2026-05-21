@@ -95,10 +95,10 @@ type AccountBalance struct {
 // BookTicker represents best bid/ask from the order book.
 type BookTicker struct {
 	Symbol    string  `json:"symbol"`
-	BidPrice  float64 `json:"bidPrice"`
-	BidQty    float64 `json:"bidQty"`
-	AskPrice  float64 `json:"askPrice"`
-	AskQty    float64 `json:"askQty"`
+	BidPrice  float64 `json:"bid_price"`
+	BidQty    float64 `json:"bid_qty"`
+	AskPrice  float64 `json:"ask_price"`
+	AskQty    float64 `json:"ask_qty"`
 	Timestamp int64   `json:"time"`
 }
 

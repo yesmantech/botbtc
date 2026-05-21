@@ -128,9 +128,14 @@ func (p *PaperClient) GetBookTicker(ctx context.Context, symbol string) (*BookTi
 	}
 
 	var bt BookTicker
-	if err := json.Unmarshal(apiResp.Data, &bt); err != nil {
+	// BingX wraps the book ticker: {"book_ticker": {...}}
+	var wrapper struct {
+		BookTicker BookTicker `json:"book_ticker"`
+	}
+	if err := json.Unmarshal(apiResp.Data, &wrapper); err != nil {
 		return p.fallbackBookTicker()
 	}
+	bt = wrapper.BookTicker
 
 	if bt.Timestamp == 0 {
 		bt.Timestamp = time.Now().UnixMilli()
