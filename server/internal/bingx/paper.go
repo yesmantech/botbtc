@@ -1,9 +1,29 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// paper.go — Paper Trading Client (simulated orders, REAL market prices)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// This client simulates order execution WITHOUT touching real money.
+// BUT it uses REAL BingX market prices for realistic simulation.
+//
+// What's real:
+//   - Book ticker prices (fetched from BingX public API every poll)
+//   - Spread, bid/ask levels
+//
+// What's simulated:
+//   - Order fills (instant fill at best bid/ask)
+//   - Balance tracking
+//   - Position tracking
+//   - Fee calculation
+// ─────────────────────────────────────────────────────────────────────────────
 package bingx
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -13,7 +33,7 @@ import (
 var _ Client = (*PaperClient)(nil)
 
 // PaperClient simulates BingX for testing without real money.
-// It uses live market data prices but simulates fill behaviour.
+// It fetches REAL market prices from BingX public API but simulates fills.
 type PaperClient struct {
 	mu sync.Mutex
 
@@ -24,6 +44,10 @@ type PaperClient struct {
 	orderSeq         int64
 	bookTicker       *BookTicker
 
+	// Real price fetching — uses BingX public (unauthenticated) API.
+	baseURL    string
+	httpClient *http.Client
+
 	makerRate float64
 	takerRate float64
 
@@ -31,21 +55,17 @@ type PaperClient struct {
 }
 
 // NewPaperClient creates a paper trading client with the given starting balance.
+// It connects to BingX public API for real-time prices.
 func NewPaperClient(symbol string, initialBalance float64, logger *slog.Logger) *PaperClient {
 	return &PaperClient{
 		symbol:           symbol,
 		simulatedBalance: initialBalance,
 		orders:           make(map[string]*OrderInfo),
+		baseURL:          "https://open-api.bingx.com",
+		httpClient:       &http.Client{Timeout: 5 * time.Second},
 		makerRate:        0.0002,
 		takerRate:        0.0005,
-		bookTicker: &BookTicker{
-			Symbol:   symbol,
-			BidPrice: 50000.0,
-			AskPrice: 50001.0,
-			BidQty:   1.0,
-			AskQty:   1.0,
-		},
-		logger: logger,
+		logger:           logger,
 	}
 }
 
@@ -75,13 +95,62 @@ func (p *PaperClient) GetContractInfo(_ context.Context, symbol string) (*Contra
 	}, nil
 }
 
-// GetBookTicker returns the currently stored book ticker.
-func (p *PaperClient) GetBookTicker(_ context.Context, _ string) (*BookTicker, error) {
+// GetBookTicker fetches the REAL best bid/ask from BingX public API.
+// This is an unauthenticated endpoint — no API key needed.
+// This way paper trading uses real market prices, not fake ones.
+func (p *PaperClient) GetBookTicker(ctx context.Context, symbol string) (*BookTicker, error) {
+	// Fetch real price from BingX public API.
+	url := fmt.Sprintf("%s/openApi/swap/v2/quote/bookTicker?symbol=%s", p.baseURL, symbol)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return p.fallbackBookTicker()
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		p.logger.Warn("paper: failed to fetch real price, using cached", "error", err)
+		return p.fallbackBookTicker()
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return p.fallbackBookTicker()
+	}
+
+	// Parse BingX API response envelope.
+	var apiResp struct {
+		Code int             `json:"code"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil || apiResp.Code != 0 {
+		return p.fallbackBookTicker()
+	}
+
+	var bt BookTicker
+	if err := json.Unmarshal(apiResp.Data, &bt); err != nil {
+		return p.fallbackBookTicker()
+	}
+
+	if bt.Timestamp == 0 {
+		bt.Timestamp = time.Now().UnixMilli()
+	}
+
+	// Cache the latest real price.
+	p.mu.Lock()
+	p.bookTicker = &bt
+	p.mu.Unlock()
+
+	return &bt, nil
+}
+
+// fallbackBookTicker returns the last cached book ticker if the API call fails.
+func (p *PaperClient) fallbackBookTicker() (*BookTicker, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.bookTicker == nil {
-		return nil, fmt.Errorf("paper: no book ticker available")
+		return nil, fmt.Errorf("paper: no book ticker available (API unreachable)")
 	}
 	cp := *p.bookTicker
 	cp.Timestamp = time.Now().UnixMilli()
@@ -119,7 +188,8 @@ func (p *PaperClient) GetCommissionRate(_ context.Context, _ string) (maker, tak
 	return p.makerRate, p.takerRate, nil
 }
 
-// PlaceOrder simulates order placement. For paper trading, orders auto-fill immediately.
+// PlaceOrder simulates order placement. For paper trading, orders auto-fill immediately
+// at the REAL market price (best ask for BUY, best bid for SELL).
 func (p *PaperClient) PlaceOrder(_ context.Context, req PlaceOrderRequest) (*PlaceOrderResponse, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -127,12 +197,13 @@ func (p *PaperClient) PlaceOrder(_ context.Context, req PlaceOrderRequest) (*Pla
 	p.orderSeq++
 	exchangeID := fmt.Sprintf("PAPER-%d", p.orderSeq)
 
+	// Use the real market price for fill simulation.
 	fillPrice := req.Price
 	if p.bookTicker != nil {
 		if req.Side == SideBuy {
-			fillPrice = p.bookTicker.AskPrice
+			fillPrice = p.bookTicker.AskPrice // buy at the ask (worst price for buyer)
 		} else {
-			fillPrice = p.bookTicker.BidPrice
+			fillPrice = p.bookTicker.BidPrice // sell at the bid (worst price for seller)
 		}
 	}
 
