@@ -62,14 +62,41 @@ func TestParseSignal_InvalidSide(t *testing.T) {
 }
 
 func TestParseSignal_SignalMapping(t *testing.T) {
-	// Test mapping LONG -> BUY
-	rawLong := `{"signal_id": "sig-003", "signal": "LONG"}`
+	// Test mapping LONG -> BUY and custom fields
+	rawLong := `{
+		"signal_id": "sig-003",
+		"signal": "LONG",
+		"timestamp_ms": 1700000000123,
+		"bid": 60000.0,
+		"ask": 60002.0,
+		"velocity250": 5.4,
+		"velocity500": 3.2,
+		"velocity1000": 1.1
+	}`
 	sigLong, err := ParseSignal([]byte(rawLong))
 	if err != nil {
 		t.Fatalf("unexpected error for LONG signal mapping: %v", err)
 	}
 	if sigLong.Side != "BUY" {
 		t.Errorf("expected mapped side BUY, got %q", sigLong.Side)
+	}
+	if sigLong.T0TickMs != 1700000000123 {
+		t.Errorf("expected T0TickMs 1700000000123, got %d", sigLong.T0TickMs)
+	}
+	if sigLong.T1SignalMs != 1700000000123 {
+		t.Errorf("expected T1SignalMs 1700000000123, got %d", sigLong.T1SignalMs)
+	}
+	if sigLong.Velocity250ms != 5.4 {
+		t.Errorf("expected Velocity250ms 5.4, got %f", sigLong.Velocity250ms)
+	}
+	if sigLong.Velocity500ms != 3.2 {
+		t.Errorf("expected Velocity500ms 3.2, got %f", sigLong.Velocity500ms)
+	}
+	if sigLong.Velocity1000ms != 1.1 {
+		t.Errorf("expected Velocity1000ms 1.1, got %f", sigLong.Velocity1000ms)
+	}
+	if sigLong.SignalPrice != 60001.0 {
+		t.Errorf("expected SignalPrice 60001.0, got %f", sigLong.SignalPrice)
 	}
 
 	// Test mapping SHORT -> SELL

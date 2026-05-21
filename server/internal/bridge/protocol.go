@@ -35,8 +35,12 @@ func ParseSignal(data []byte) (*model.Signal, error) {
 
 	// Also parse to check if "signal" is present instead of/in addition to "side"
 	var customSig struct {
-		Signal string `json:"signal"`
-		Side   string `json:"side"`
+		Signal       string  `json:"signal"`
+		Side         string  `json:"side"`
+		TimestampMs  int64   `json:"timestamp_ms"`
+		Velocity250  float64 `json:"velocity250"`
+		Velocity500  float64 `json:"velocity500"`
+		Velocity1000 float64 `json:"velocity1000"`
 	}
 	if err := json.Unmarshal(data, &customSig); err == nil {
 		if sig.Side == "" && customSig.Side != "" {
@@ -52,6 +56,25 @@ func ParseSignal(data []byte) (*model.Signal, error) {
 				sig.Side = customSig.Signal
 			}
 		}
+		if sig.T0TickMs == 0 && customSig.TimestampMs != 0 {
+			sig.T0TickMs = customSig.TimestampMs
+		}
+		if sig.T1SignalMs == 0 && customSig.TimestampMs != 0 {
+			sig.T1SignalMs = customSig.TimestampMs
+		}
+		if sig.Velocity250ms == 0 && customSig.Velocity250 != 0 {
+			sig.Velocity250ms = customSig.Velocity250
+		}
+		if sig.Velocity500ms == 0 && customSig.Velocity500 != 0 {
+			sig.Velocity500ms = customSig.Velocity500
+		}
+		if sig.Velocity1000ms == 0 && customSig.Velocity1000 != 0 {
+			sig.Velocity1000ms = customSig.Velocity1000
+		}
+	}
+
+	if sig.SignalPrice == 0 && sig.Bid != 0 && sig.Ask != 0 {
+		sig.SignalPrice = (sig.Bid + sig.Ask) / 2.0
 	}
 
 	if sig.SignalID == "" {
