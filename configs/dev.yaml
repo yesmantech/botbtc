@@ -74,7 +74,7 @@ quantity:
   qty_precision: 3              # decimal places for quantity
   tick_size: 0.1                # minimum price movement
   max_leverage: 150             # max leverage on BingX for BTC
-  default_leverage: 20          # conservative default
+  default_leverage: 125          # aggressive for scalping (BingX scales down for large positions)
 
 logging:
   level: "debug"

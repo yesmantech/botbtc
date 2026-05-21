@@ -81,7 +81,7 @@ func main() {
 	var exchange bingx.Client
 	if cfg.BingX.PaperMode {
 		logger.Info("starting in PAPER mode — no real orders")
-		exchange = bingx.NewPaperClient(cfg.BingX.Symbol, 10000.0, logger)
+		exchange = bingx.NewPaperClient(cfg.BingX.Symbol, 100000.0, logger) // $100K simulated equity
 	} else {
 		logger.Info("starting in LIVE mode", "base_url", cfg.BingX.BaseURL)
 		liveClient := bingx.NewLiveClient(cfg.BingX, logger)
