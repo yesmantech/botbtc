@@ -48,7 +48,7 @@ trailing:
       lock_usd: 35.0
 
 latency:
-  max_signal_age_ms: 250
+  max_signal_age_ms: 2000        # generous for MT5→TCP→Go cross-process latency
   max_mt5_to_bridge_ms: 10
   max_signal_to_ack_ms: 150
   max_signal_to_fill_ms: 250
