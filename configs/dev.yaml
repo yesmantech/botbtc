@@ -60,8 +60,8 @@ orders:
   aggressive_ioc_timeout_ms: 150
   max_total_entry_window_ms: 250
   max_reprice_attempts: 2
-  max_entry_slippage_usd: 3.0
-  max_exit_slippage_usd: 5.0
+  max_entry_slippage_usd: 50.0  # tolerance for MT5↔BingX price difference
+  max_exit_slippage_usd: 50.0
 
 # ── BingX contract rules ──────────────────────────────────────────────────
 # These are defaults — the server SHOULD load actual values from BingX API.
