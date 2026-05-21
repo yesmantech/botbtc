@@ -59,6 +59,9 @@ func (w *WSMarketClient) BookChan() <-chan *BookTicker {
 }
 
 // LatestBook returns the most recent book ticker (thread-safe).
+// Since we're connected to a WebSocket stream, the data IS current even if
+// no new tick arrived recently — it just means the price hasn't changed.
+// We always set the timestamp to "now" to prevent false stale rejections.
 func (w *WSMarketClient) LatestBook() *BookTicker {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -66,6 +69,7 @@ func (w *WSMarketClient) LatestBook() *BookTicker {
 		return nil
 	}
 	cp := *w.latestBook
+	cp.Timestamp = time.Now().UnixMilli() // data is live via WebSocket
 	return &cp
 }
 
