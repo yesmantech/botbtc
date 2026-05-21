@@ -1,0 +1,92 @@
+# ============================================================================
+# BTC MT5 → BingX Scalper — Development Configuration
+# ============================================================================
+# WARNING: Do NOT commit API keys. Use environment variables in production.
+# ============================================================================
+
+bridge:
+  host: "127.0.0.1"
+  port: 9090
+  read_timeout_ms: 5000
+  max_connections: 2
+
+bingx:
+  api_key: "${BINGX_API_KEY}"
+  api_secret: "${BINGX_API_SECRET}"
+  base_url: "https://open-api.bingx.com"
+  ws_market_url: "wss://open-api.bingx.com/swap-market"
+  ws_account_url: "wss://open-api.bingx.com/swap-market"
+  recv_window: 5000
+  symbol: "BTC-USDT"
+  account_id: "dev"
+  paper_mode: true              # dev mode: no real orders
+
+risk:
+  base_risk_percent: 1.0
+  escalated_risk_percent: 2.0
+  escalate_after_consecutive_losses: 2
+  max_daily_trades: 3
+  max_daily_stop_losses: 3
+  max_open_positions: 1
+
+trade:
+  max_trade_duration_ms: 6000
+  initial_stop_loss_usd: 30.0
+  max_take_profit_usd: 60.0
+  time_stop_no_progress_ms: 1500
+  min_favorable_move_usd: 8.0
+
+trailing:
+  enabled: true
+  activation_usd: 20.0
+  steps:
+    - profit_usd: 20.0
+      lock_usd: 2.0
+    - profit_usd: 35.0
+      lock_usd: 15.0
+    - profit_usd: 50.0
+      lock_usd: 35.0
+
+latency:
+  max_signal_age_ms: 250
+  max_mt5_to_bridge_ms: 10
+  max_signal_to_ack_ms: 150
+  max_signal_to_fill_ms: 250
+
+orders:
+  order_type: "LIMIT_ONLY"
+  entry_mode: "POST_ONLY_PROBE_THEN_AGGRESSIVE_IOC"
+  maker_probe_timeout_ms: 80
+  aggressive_ioc_timeout_ms: 150
+  max_total_entry_window_ms: 250
+  max_reprice_attempts: 2
+  max_entry_slippage_usd: 3.0
+  max_exit_slippage_usd: 5.0
+
+# ── BingX contract rules ──────────────────────────────────────────────────
+# These are defaults — the server SHOULD load actual values from BingX API.
+# TODO: auto-fetch from GET /openApi/swap/v2/quote/contracts
+quantity:
+  min_qty: 0.001                # minimum BTC order size
+  max_qty: 100.0                # maximum BTC order size
+  qty_step: 0.001               # quantity increment
+  price_precision: 1            # decimal places for price
+  qty_precision: 3              # decimal places for quantity
+  tick_size: 0.1                # minimum price movement
+  max_leverage: 150             # max leverage on BingX for BTC
+  default_leverage: 20          # conservative default
+
+logging:
+  level: "debug"
+  file: "logs/scalper.log"
+
+monitoring:
+  prometheus_port: 9100
+  enable_alerts: false
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+
+storage:
+  event_log_file: "logs/events.jsonl"
+  buffer_size: 1000
+  flush_interval_ms: 5000

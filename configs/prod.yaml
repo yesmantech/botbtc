@@ -1,0 +1,90 @@
+# ============================================================================
+# BTC MT5 → BingX Scalper — Production Configuration
+# ============================================================================
+# LIVE TRADING. All API keys MUST come from environment variables.
+# NEVER commit secrets to source control.
+# ============================================================================
+
+bridge:
+  host: "127.0.0.1"
+  port: 9090
+  read_timeout_ms: 5000
+  max_connections: 1           # strict: only 1 MT5 connection in prod
+
+bingx:
+  api_key: "${BINGX_API_KEY}"
+  api_secret: "${BINGX_API_SECRET}"
+  base_url: "https://open-api.bingx.com"
+  ws_market_url: "wss://open-api.bingx.com/swap-market"
+  ws_account_url: "wss://open-api.bingx.com/swap-market"
+  recv_window: 5000
+  symbol: "BTC-USDT"
+  account_id: "prod"
+  paper_mode: false              # LIVE TRADING
+
+risk:
+  base_risk_percent: 1.0
+  escalated_risk_percent: 2.0
+  escalate_after_consecutive_losses: 2
+  max_daily_trades: 3
+  max_daily_stop_losses: 3
+  max_open_positions: 1
+
+trade:
+  max_trade_duration_ms: 6000
+  initial_stop_loss_usd: 30.0
+  max_take_profit_usd: 60.0
+  time_stop_no_progress_ms: 1500
+  min_favorable_move_usd: 8.0
+
+trailing:
+  enabled: true
+  activation_usd: 20.0
+  steps:
+    - profit_usd: 20.0
+      lock_usd: 2.0
+    - profit_usd: 35.0
+      lock_usd: 15.0
+    - profit_usd: 50.0
+      lock_usd: 35.0
+
+latency:
+  max_signal_age_ms: 250
+  max_mt5_to_bridge_ms: 10
+  max_signal_to_ack_ms: 150
+  max_signal_to_fill_ms: 250
+
+orders:
+  order_type: "LIMIT_ONLY"
+  entry_mode: "POST_ONLY_PROBE_THEN_AGGRESSIVE_IOC"
+  maker_probe_timeout_ms: 80
+  aggressive_ioc_timeout_ms: 150
+  max_total_entry_window_ms: 250
+  max_reprice_attempts: 2
+  max_entry_slippage_usd: 3.0
+  max_exit_slippage_usd: 5.0
+
+quantity:
+  min_qty: 0.001
+  max_qty: 100.0
+  qty_step: 0.001
+  price_precision: 1
+  qty_precision: 3
+  tick_size: 0.1
+  max_leverage: 150
+  default_leverage: 20
+
+logging:
+  level: "warn"
+  file: "logs/scalper-prod.log"
+
+monitoring:
+  prometheus_port: 9100
+  enable_alerts: true
+  telegram_bot_token: "${TELEGRAM_BOT_TOKEN}"
+  telegram_chat_id: "${TELEGRAM_CHAT_ID}"
+
+storage:
+  event_log_file: "logs/events.jsonl"
+  buffer_size: 2000
+  flush_interval_ms: 1000

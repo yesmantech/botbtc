@@ -1,0 +1,48 @@
+# .gitignore — BTC MT5 → BingX Scalper
+
+# Go binaries
+server/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test binary
+*.test
+
+# Go coverage
+*.out
+coverage.html
+
+# Logs
+logs/
+*.log
+
+# Config secrets (never commit)
+configs/secrets.yaml
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker/data/
+
+# MT5 compiled files
+mt5/Experts/*.ex5
+mt5/Include/*.ex5
+*.ex5
+
+# Temporary
+tmp/
+temp/
