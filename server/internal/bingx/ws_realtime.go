@@ -128,6 +128,7 @@ func (w *WSMarketClient) connectAndStream(ctx context.Context) error {
 	w.logger.Info("websocket subscribed", "channel", w.symbol+"@bookTicker")
 
 	// Read loop
+	msgCount := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -147,6 +148,15 @@ func (w *WSMarketClient) connectAndStream(ctx context.Context) error {
 			msg = rawMsg
 		}
 
+		msgCount++
+		// Log first 5 messages for debugging format
+		if msgCount <= 5 {
+			w.logger.Debug("websocket raw message",
+				"msg_num", msgCount,
+				"data", string(msg),
+			)
+		}
+
 		// Handle ping/pong
 		if handlePingPong(conn, msg) {
 			continue
@@ -155,14 +165,28 @@ func (w *WSMarketClient) connectAndStream(ctx context.Context) error {
 		// Parse book ticker update
 		bt, err := parseBookTickerWS(msg)
 		if err != nil {
-			// Could be a subscription confirmation or other message, skip
+			if msgCount <= 10 {
+				w.logger.Debug("websocket parse skip", "error", err, "msg_num", msgCount)
+			}
 			continue
 		}
+
+		// Always use current time for freshness — BingX timestamps can be stale
+		bt.Timestamp = time.Now().UnixMilli()
 
 		// Update latest book
 		w.mu.Lock()
 		w.latestBook = bt
 		w.mu.Unlock()
+
+		// Log periodically
+		if msgCount <= 5 || msgCount%1000 == 0 {
+			w.logger.Info("websocket tick",
+				"msg_num", msgCount,
+				"bid", bt.BidPrice,
+				"ask", bt.AskPrice,
+			)
+		}
 
 		// Send to channel (non-blocking)
 		select {
