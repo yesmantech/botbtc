@@ -49,6 +49,7 @@ long           g_ticksSeen      = 0;
 long           g_signalsSent    = 0;
 bool           g_initialized    = false;
 bool           g_killSwitch     = false;    // manual kill switch (press K)
+bool           g_symbolReady    = false;    // deferred symbol initialization status
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                             |
@@ -57,6 +58,16 @@ int OnInit()
 {
    // --- Validate symbol ---
    string sym = Symbol();
+   if(sym != "BTCUSDT.bingx")
+   {
+      g_symbolReady = false;
+      EventSetMillisecondTimer(500); // Poll for symbol existence every 500ms
+      Print("[EA] Loaded on ", sym, ". Waiting for custom symbol BTCUSDT.bingx...");
+      return INIT_SUCCEEDED;
+   }
+
+   g_symbolReady = true;
+
    PrintFormat("[EA] Starting on %s  |  MagicNumber=%d  |  CooldownMs=%d  |  MinTickCount=%d",
                sym, MagicNumber, CooldownMs, MinTickCount);
 
@@ -149,7 +160,7 @@ void UpdateChartComment()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   if(!g_initialized)
+   if(!g_initialized || !g_symbolReady)
       return;
 
    // --- Read current tick ---
@@ -260,6 +271,25 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   if(!g_symbolReady)
+   {
+      bool isCustom = false;
+      if(SymbolExist("BTCUSDT.bingx", isCustom))
+      {
+         Print("[EA] Custom symbol BTCUSDT.bingx detected! Switching chart symbol...");
+         if(ChartSetSymbolPeriod(0, "BTCUSDT.bingx", PERIOD_H1))
+         {
+            EventKillTimer();
+            return;
+         }
+         else
+         {
+            Print("[EA] ChartSetSymbolPeriod failed: ", GetLastError());
+         }
+      }
+      return;
+   }
+
    if(!g_bridge.IsConnected())
    {
       g_bridge.TryReconnect();

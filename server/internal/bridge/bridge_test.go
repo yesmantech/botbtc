@@ -61,6 +61,28 @@ func TestParseSignal_InvalidSide(t *testing.T) {
 	}
 }
 
+func TestParseSignal_SignalMapping(t *testing.T) {
+	// Test mapping LONG -> BUY
+	rawLong := `{"signal_id": "sig-003", "signal": "LONG"}`
+	sigLong, err := ParseSignal([]byte(rawLong))
+	if err != nil {
+		t.Fatalf("unexpected error for LONG signal mapping: %v", err)
+	}
+	if sigLong.Side != "BUY" {
+		t.Errorf("expected mapped side BUY, got %q", sigLong.Side)
+	}
+
+	// Test mapping SHORT -> SELL
+	rawShort := `{"signal_id": "sig-004", "signal": "SHORT"}`
+	sigShort, err := ParseSignal([]byte(rawShort))
+	if err != nil {
+		t.Fatalf("unexpected error for SHORT signal mapping: %v", err)
+	}
+	if sigShort.Side != "SELL" {
+		t.Errorf("expected mapped side SELL, got %q", sigShort.Side)
+	}
+}
+
 func TestParseSignal_InvalidJSON(t *testing.T) {
 	_, err := ParseSignal([]byte(`not json`))
 	if err == nil {

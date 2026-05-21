@@ -3,6 +3,7 @@ package bridge
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -154,6 +155,10 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 
 		sig, err := ParseSignal(line)
 		if err != nil {
+			if errors.Is(err, ErrHeartbeat) {
+				s.logger.Debug("bridge heartbeat received", "remote", remote)
+				continue
+			}
 			s.logger.Error("bridge parse error", "remote", remote, "error", err)
 			ack, _ := BuildACK("", "ERROR")
 			_, _ = conn.Write(ack)
