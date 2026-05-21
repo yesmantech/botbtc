@@ -93,7 +93,17 @@ func main() {
 	}
 
 	// ── Market Data Poller ───────────────────────────────────────────
+	// REST poller still needed for paper client's price fetching.
 	marketPoller := bingx.NewMarketDataPoller(exchange, cfg.BingX.Symbol, 200, logger)
+
+	// ── WebSocket Real-Time Market Data ──────────────────────────────
+	// WebSocket replaces REST polling for real-time book ticker data.
+	// ~2ms latency vs ~200ms polling staleness.
+	wsURL := "wss://open-api-ws.bingx.com/market"
+	wsClient := bingx.NewWSMarketClient(wsURL, cfg.BingX.Symbol, logger)
+
+	// Use WebSocket as the market data provider for the pipeline.
+	var marketData bingx.MarketDataProvider = wsClient
 
 	// ── Core Components ──────────────────────────────────────────────
 	riskEngine := risk.NewEngine(cfg.Risk, logger)
@@ -111,7 +121,7 @@ func main() {
 		orderMgr,
 		latencyTracker,
 		exchange,
-		marketPoller,
+		marketData, // WebSocket real-time data
 		logger,
 	)
 
@@ -155,8 +165,11 @@ func main() {
 	// Start async event writer.
 	eventWriter.Start(ctx)
 
-	// Start market data poller (runs in background goroutine because it blocks).
+	// Start REST market data poller (still needed for paper client).
 	go marketPoller.Start(ctx)
+
+	// Start WebSocket real-time market data.
+	go wsClient.Start(ctx)
 
 	// Start Prometheus metrics endpoint.
 	go func() {
@@ -182,13 +195,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Forward market data ticks to MT5 price feed clients.
+	// Forward WebSocket ticks to MT5 price feed clients.
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case bt, ok := <-marketPoller.BookChan():
+			case bt, ok := <-wsClient.BookChan():
 				if !ok {
 					return
 				}

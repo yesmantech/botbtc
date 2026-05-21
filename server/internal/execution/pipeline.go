@@ -89,7 +89,7 @@ type Pipeline struct {
 	orderMgr     *orders.Manager             // tracks order state (created→submitted→filled)
 	latTracker   *monitoring.LatencyTracker   // records T0-T7 timestamps
 	exchange     bingx.Client                // BingX API client (live or paper)
-	marketPoller *bingx.MarketDataPoller      // provides latest bid/ask prices
+	marketPoller bingx.MarketDataProvider      // provides latest bid/ask prices (REST poller or WebSocket)
 	logger       *slog.Logger                // structured JSON logger
 
 	// Active position tracking — protected by mutex because it's accessed
@@ -112,7 +112,7 @@ func NewPipeline(
 	orderMgr *orders.Manager,
 	latTracker *monitoring.LatencyTracker,
 	exchange bingx.Client,
-	marketPoller *bingx.MarketDataPoller,
+	marketPoller bingx.MarketDataProvider,
 	logger *slog.Logger,
 ) *Pipeline {
 	return &Pipeline{

@@ -141,3 +141,11 @@ type Client interface {
 	// Connection
 	Close() error
 }
+
+// MarketDataProvider is the interface for components that provide real-time
+// market data (book ticker). Both MarketDataPoller (REST) and WSMarketClient
+// (WebSocket) implement this interface.
+type MarketDataProvider interface {
+	LatestBook() *BookTicker
+	BookChan() <-chan *BookTicker
+}
